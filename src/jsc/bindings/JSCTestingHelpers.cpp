@@ -11,7 +11,11 @@
 #include <JavaScriptCore/JSBigInt.h>
 // From JavaScriptCore/llint/LLIntPCRanges.h (not forwarded in the prebuilt
 // headers); the symbol is `extern "C"` so the namespace only scopes the name.
-namespace JSC { namespace LLInt { extern "C" void llintPCRangeStart(); } }
+namespace JSC {
+namespace LLInt {
+extern "C" void llintPCRangeStart();
+}
+}
 #endif
 
 namespace Bun {
