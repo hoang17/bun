@@ -192,11 +192,13 @@ describe.if(isWindows)("Windows VEH handler and first-chance faults in external 
     expect(exitCode).not.toBe(0);
   });
 
-  // Validate WebKit's registerJITUnwindInfo / registerImageUnwindInfoWin
-  // against the actual unwinder: RtlLookupFunctionEntry must return a
-  // RUNTIME_FUNCTION for both a JIT pool PC and an LLInt PC. This is the
-  // smoke test for the hand-encoded UNWIND_INFO / .xdata bytes.
-  test("RtlLookupFunctionEntry resolves JSC JIT and LLInt PCs", async () => {
+  // Validate WebKit's registerJITUnwindInfo against the actual unwinder:
+  // RtlLookupFunctionEntry must return a RUNTIME_FUNCTION for a JIT pool PC.
+  // This is the smoke test for the hand-encoded UNWIND_INFO / .xdata bytes.
+  // LLInt PCs are not covered here: LLInt lives in image .text and Windows
+  // only consults static .pdata for in-module PCs; that needs build-time
+  // .seh_* emission in offlineasm (follow-up).
+  test("RtlLookupFunctionEntry resolves JSC JIT pool PCs", async () => {
     await using proc = Bun.spawn({
       cmd: [
         bunExe(),
@@ -210,15 +212,11 @@ describe.if(isWindows)("Windows VEH handler and first-chance faults in external 
          });
          const { jscInternals } = require("bun:internal-for-testing");
          const pool = jscInternals.startOfFixedExecutableMemoryPool();
-         const llint = jscInternals.llintPCRangeStart();
          const imageBase = new BigUint64Array(1);
          const jitEntry = symbols.RtlLookupFunctionEntry(pool + 0x100n, ptr(imageBase), null);
-         const llintEntry = symbols.RtlLookupFunctionEntry(llint + 0x100n, ptr(imageBase), null);
          console.log(JSON.stringify({
            pool: pool.toString(16),
-           llint: llint.toString(16),
            jitEntry: jitEntry === null ? "null" : "ok",
-           llintEntry: llintEntry === null ? "null" : "ok",
          }));`,
       ],
       env: noReportEnv,
@@ -228,10 +226,7 @@ describe.if(isWindows)("Windows VEH handler and first-chance faults in external 
 
     expect(stderr).toBe("");
     const out = JSON.parse(stdout.trim());
-    expect({ jitEntry: out.jitEntry, llintEntry: out.llintEntry }).toEqual({
-      jitEntry: "ok",
-      llintEntry: "ok",
-    });
+    expect(out.jitEntry).toBe("ok");
     expect(exitCode).toBe(0);
   });
 

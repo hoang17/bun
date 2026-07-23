@@ -9,13 +9,6 @@
 #if OS(WINDOWS)
 #include <JavaScriptCore/ExecutableAllocator.h>
 #include <JavaScriptCore/JSBigInt.h>
-// From JavaScriptCore/llint/LLIntPCRanges.h (not forwarded in the prebuilt
-// headers); the symbol is `extern "C"` so the namespace only scopes the name.
-namespace JSC {
-namespace LLInt {
-extern "C" void llintPCRangeStart();
-}
-}
 #endif
 
 namespace Bun {
@@ -68,13 +61,6 @@ JSC_DEFINE_HOST_FUNCTION(jsFunctionStartOfFixedExecutableMemoryPool,
     return JSValue::encode(JSBigInt::makeHeapBigIntOrBigInt32(globalObject,
         static_cast<uint64_t>(JSC::startOfFixedExecutableMemoryPool<uintptr_t>())));
 }
-
-JSC_DEFINE_HOST_FUNCTION(jsFunctionLlintPCRangeStart,
-    (JSGlobalObject * globalObject, CallFrame*))
-{
-    return JSValue::encode(JSBigInt::makeHeapBigIntOrBigInt32(globalObject,
-        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(&JSC::LLInt::llintPCRangeStart))));
-}
 #endif
 
 JSC::JSValue createJSCTestingHelpers(Zig::GlobalObject* globalObject)
@@ -97,11 +83,6 @@ JSC::JSValue createJSCTestingHelpers(Zig::GlobalObject* globalObject)
     object->putDirectNativeFunction(
         vm, globalObject, JSC::Identifier::fromString(vm, "startOfFixedExecutableMemoryPool"_s), 0,
         jsFunctionStartOfFixedExecutableMemoryPool, ImplementationVisibility::Public, NoIntrinsic,
-        JSC::PropertyAttribute::DontDelete | 0);
-
-    object->putDirectNativeFunction(
-        vm, globalObject, JSC::Identifier::fromString(vm, "llintPCRangeStart"_s), 0,
-        jsFunctionLlintPCRangeStart, ImplementationVisibility::Public, NoIntrinsic,
         JSC::PropertyAttribute::DontDelete | 0);
 #endif
 
