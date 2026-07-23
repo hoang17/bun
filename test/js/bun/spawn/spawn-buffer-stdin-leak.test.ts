@@ -36,30 +36,22 @@ async function measure(mode: "drain" | "reject") {
 }
 
 describe.skipIf(!isWindows)("Bun.spawn with an ArrayBuffer stdin does not leak the stdin pipe writer", () => {
-  test(
-    "when the child drains stdin (on_write release)",
-    async () => {
-      const deltaKB = await measure("drain");
-      // Unfixed: one `StaticPipeWriter` (with its embedded `uv_write_t`) per
-      // spawn, ~800 B each, so ~2.4 MB over 3000 spawns in release and more
-      // under debug/ASAN redzones. Fixed: the same workload is within a few
-      // hundred KB of the `stdin: "ignore"` baseline.
-      const boundKB = isASAN || isDebug ? 1200 : 800;
-      expect(deltaKB).toBeLessThan(boundKB);
-    },
-    120_000,
-  );
+  test("when the child drains stdin (on_write release)", async () => {
+    const deltaKB = await measure("drain");
+    // Unfixed: one `StaticPipeWriter` (with its embedded `uv_write_t`) per
+    // spawn, ~800 B each, so ~2.4 MB over 3000 spawns in release and more
+    // under debug/ASAN redzones. Fixed: the same workload is within a few
+    // hundred KB of the `stdin: "ignore"` baseline.
+    const boundKB = isASAN || isDebug ? 1200 : 800;
+    expect(deltaKB).toBeLessThan(boundKB);
+  }, 120_000);
 
-  test(
-    "when the child rejects stdin (on_close release)",
-    async () => {
-      const deltaKB = await measure("reject");
-      // Unfixed: the error arm of `on_write_complete` strands start()'s +1 the
-      // same way; with a 256 KB buffer the leaked write request is larger and
-      // 3000 spawns grew RSS by ~28 MB in release. Fixed: a few hundred KB.
-      const boundKB = isASAN || isDebug ? 2000 : 1500;
-      expect(deltaKB).toBeLessThan(boundKB);
-    },
-    120_000,
-  );
+  test("when the child rejects stdin (on_close release)", async () => {
+    const deltaKB = await measure("reject");
+    // Unfixed: the error arm of `on_write_complete` strands start()'s +1 the
+    // same way; with a 256 KB buffer the leaked write request is larger and
+    // 3000 spawns grew RSS by ~28 MB in release. Fixed: a few hundred KB.
+    const boundKB = isASAN || isDebug ? 2000 : 1500;
+    expect(deltaKB).toBeLessThan(boundKB);
+  }, 120_000);
 });
