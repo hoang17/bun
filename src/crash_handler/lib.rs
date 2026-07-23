@@ -2117,10 +2117,7 @@ mod draft {
         let pc = record.ExceptionAddress as usize;
         let base = WINDOWS_EXE_IMAGE_BASE.load(Ordering::Relaxed);
         let end = WINDOWS_EXE_IMAGE_END.load(Ordering::Relaxed);
-        if base != 0
-            && !(base..end).contains(&pc)
-            && record.ExceptionFlags & bun_sys::windows::EXCEPTION_NONCONTINUABLE == 0
-        {
+        if base != 0 && !(base..end).contains(&pc) {
             return bun_sys::windows::EXCEPTION_CONTINUE_SEARCH;
         }
 
@@ -2158,7 +2155,7 @@ mod draft {
         // SAFETY: kernel provides a valid EXCEPTION_POINTERS / EXCEPTION_RECORD.
         let record = unsafe { &*(*info).ExceptionRecord };
         let Some(reason) = classify_exception_windows(record) else {
-            return bun_sys::windows::EXCEPTION_EXECUTE_HANDLER;
+            return bun_sys::windows::EXCEPTION_CONTINUE_SEARCH;
         };
         let pc = record.ExceptionAddress as usize;
         crash_handler(reason, TraceSeed::Fault { pc, fp: 0 });

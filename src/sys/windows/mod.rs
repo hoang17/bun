@@ -1208,9 +1208,7 @@ pub fn DeleteFileBun(sub_path_w: &[u16], options: DeleteFileOptions) -> bun_sys:
 
 pub const EXCEPTION_CONTINUE_EXECUTION: i32 = -1;
 pub const EXCEPTION_CONTINUE_SEARCH: i32 = 0;
-pub const EXCEPTION_EXECUTE_HANDLER: i32 = 1;
 pub const MS_VC_EXCEPTION: u32 = 0x406d1388;
-pub const EXCEPTION_NONCONTINUABLE: u32 = 0x1;
 
 /// `[base, base + SizeOfImage)` of the process executable, read once from the
 /// mapped PE header. The crash handler uses this to tell first-chance
