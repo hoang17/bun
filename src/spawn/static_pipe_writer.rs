@@ -268,6 +268,15 @@ impl<P: StaticPipeWriterProcess> StaticPipeWriter<P> {
             "StaticPipeWriter(0x{:x}) onClose()",
             std::ptr::from_ref(self) as usize
         );
+        // On Windows the error arm of `WindowsBufferedWriter::on_write_complete`
+        // reaches here via `close()` without ever calling `Parent::on_write`, so
+        // this is the last point `started` can be claimed for that path.
+        // `write()`'s +1 (held by that callback's scopeguard) keeps `self` live
+        // past the deref. POSIX must not release here: `drain_buffered_data`
+        // may call `on_error()` -> `close()` -> here and then `on_write()` on
+        // the same object, with no extra ref held.
+        #[cfg(windows)]
+        let release_start_ref = core::mem::replace(&mut self.started, false);
         // `buffer` aliases `self.source`'s storage; clear it before detach()
         // frees that storage so no dangling slice survives the close.
         self.buffer = RawSlice::EMPTY;
@@ -275,6 +284,12 @@ impl<P: StaticPipeWriterProcess> StaticPipeWriter<P> {
         // SAFETY: `process` is a backref to the owning process, guaranteed alive
         // for the lifetime of this writer (the process owns/outlives its stdio writers).
         unsafe { P::on_close_io(self.process, StdioKind::Stdin) };
+        #[cfg(windows)]
+        if release_start_ref {
+            // SAFETY: `started` was the token for start()'s outstanding +1;
+            // cleared above so no other site re-derefs. Last use of `self`.
+            unsafe { RefCount::<Self>::deref(std::ptr::from_mut::<Self>(self)) };
+        }
     }
 
     pub fn memory_cost(&self) -> usize {
