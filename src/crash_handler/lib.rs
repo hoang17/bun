@@ -1764,6 +1764,10 @@ mod draft {
         }
         #[cfg(windows)]
         {
+            let range = bun_sys::windows::exe_image_range();
+            WINDOWS_EXE_IMAGE_BASE.store(range.start, Ordering::Relaxed);
+            WINDOWS_EXE_IMAGE_END.store(range.end, Ordering::Relaxed);
+
             // SAFETY: AddVectoredExceptionHandler is a valid Win32 call
             unsafe {
                 // SAFETY: ABI-identical `extern "system" fn(*mut _) -> i32` —
@@ -1780,6 +1784,19 @@ mod draft {
                 // `reset_on_posix`). `HANDLE` is `*mut c_void`; cast is identity.
                 bun_core::WINDOWS_SEGFAULT_HANDLE
                     .store(handle as *mut core::ffi::c_void, Ordering::Relaxed);
+
+                // Backstop for exceptions the VEH passed on: runs only after
+                // every frame-based (SEH) handler has declined, so an
+                // exception a foreign module handles itself never reaches it.
+                // The handler JSC registers for JIT/LLInt frames
+                // (ZigGlobalObject.cpp -> setJITExceptionHandlerWin) catches
+                // the under-JIT case before this.
+                bun_sys::windows::kernel32::SetUnhandledExceptionFilter(Some(
+                    bun_ptr::cast_fn_ptr::<
+                        extern "system" fn(*mut bun_sys::windows::EXCEPTION_POINTERS) -> c_long,
+                        unsafe extern "system" fn(*mut core::ffi::c_void) -> i32,
+                    >(handle_unhandled_exception_windows),
+                ));
             }
         }
         #[cfg(any(
@@ -2019,6 +2036,11 @@ mod draft {
                     unsafe { bun_sys::windows::kernel32::RemoveVectoredExceptionHandler(handle) };
                 debug_assert!(rc != 0);
             }
+            // SAFETY: no memory-safety preconditions; clears the top-level
+            // filter back to the OS default.
+            unsafe {
+                bun_sys::windows::kernel32::SetUnhandledExceptionFilter(None);
+            }
             return;
         }
 
@@ -2037,43 +2059,108 @@ mod draft {
     }
 
     #[cfg(windows)]
-    pub(crate) extern "system" fn handle_segfault_windows(
-        info: *mut bun_sys::windows::EXCEPTION_POINTERS,
-    ) -> c_long {
-        // SAFETY: kernel provides a valid EXCEPTION_POINTERS
-        let info = unsafe { &*info };
-        let reason = match unsafe { (*info.ExceptionRecord).ExceptionCode } {
+    static WINDOWS_EXE_IMAGE_BASE: AtomicUsize = AtomicUsize::new(0);
+    #[cfg(windows)]
+    static WINDOWS_EXE_IMAGE_END: AtomicUsize = AtomicUsize::new(0);
+
+    #[cfg(windows)]
+    fn classify_exception_windows(
+        record: &bun_sys::windows::EXCEPTION_RECORD,
+    ) -> Option<CrashReason> {
+        Some(match record.ExceptionCode {
             bun_sys::windows::EXCEPTION_DATATYPE_MISALIGNMENT => CrashReason::DatatypeMisalignment,
             bun_sys::windows::EXCEPTION_ACCESS_VIOLATION => {
-                CrashReason::SegmentationFault(unsafe {
-                    (*info.ExceptionRecord).ExceptionInformation[1]
-                })
+                CrashReason::SegmentationFault(record.ExceptionInformation[1])
             }
             bun_sys::windows::EXCEPTION_ILLEGAL_INSTRUCTION => {
                 // `ExceptionAddress` is the faulting RIP for `STATUS_ILLEGAL_
                 // INSTRUCTION` (winnt.h); avoids depending on the arch-specific
                 // `CONTEXT` layout.
-                CrashReason::IllegalInstruction(
-                    unsafe { (*info.ExceptionRecord).ExceptionAddress } as usize
-                )
+                CrashReason::IllegalInstruction(record.ExceptionAddress as usize)
             }
             bun_sys::windows::EXCEPTION_STACK_OVERFLOW => CrashReason::StackOverflow,
+            _ => return None,
+        })
+    }
 
-            // exception used for thread naming
-            // https://learn.microsoft.com/en-us/previous-versions/visualstudio/visual-studio-2017/debugger/how-to-set-a-thread-name-in-native-code?view=vs-2017#set-a-thread-name-by-throwing-an-exception
-            // related commit
-            // https://github.com/go-delve/delve/pull/1384
-            bun_sys::windows::MS_VC_EXCEPTION => {
-                return bun_sys::windows::EXCEPTION_CONTINUE_EXECUTION;
-            }
+    #[cfg(windows)]
+    pub(crate) extern "system" fn handle_segfault_windows(
+        info: *mut bun_sys::windows::EXCEPTION_POINTERS,
+    ) -> c_long {
+        // SAFETY: kernel provides a valid EXCEPTION_POINTERS / EXCEPTION_RECORD.
+        let record = unsafe { &*(*info).ExceptionRecord };
 
-            _ => return bun_sys::windows::EXCEPTION_CONTINUE_SEARCH,
+        // exception used for thread naming
+        // https://learn.microsoft.com/en-us/previous-versions/visualstudio/visual-studio-2017/debugger/how-to-set-a-thread-name-in-native-code?view=vs-2017#set-a-thread-name-by-throwing-an-exception
+        // related commit
+        // https://github.com/go-delve/delve/pull/1384
+        if record.ExceptionCode == bun_sys::windows::MS_VC_EXCEPTION {
+            return bun_sys::windows::EXCEPTION_CONTINUE_EXECUTION;
+        }
+
+        let Some(reason) = classify_exception_windows(record) else {
+            return bun_sys::windows::EXCEPTION_CONTINUE_SEARCH;
         };
-        // SAFETY: kernel provides a valid EXCEPTION_RECORD; ExceptionAddress is
-        // the faulting instruction.
-        let pc = unsafe { (*info.ExceptionRecord).ExceptionAddress } as usize;
+
+        // VEH runs before any frame-based (SEH) handler. Windows system code
+        // deliberately uses SEH to probe unchecked handles: CRYPTSP.dll, for
+        // example, validates an HCRYPTPROV by reading `[rcx+0E8h]` inside a
+        // `__try`/`__except` that turns the access violation into
+        // `ERROR_INVALID_PARAMETER`. Treating that first-chance exception as
+        // fatal kills the process for what the callee was about to recover
+        // from. So only take over here when the faulting instruction is inside
+        // Bun's own image; for foreign code, let SEH dispatch proceed. JSC
+        // registers unwind info for JIT/LLInt and a language-specific handler
+        // that routes back to `Bun__crashHandlerFromJSCFrame`, and
+        // `handle_unhandled_exception_windows` reports anything that still
+        // goes unhandled.
+        let pc = record.ExceptionAddress as usize;
+        let base = WINDOWS_EXE_IMAGE_BASE.load(Ordering::Relaxed);
+        let end = WINDOWS_EXE_IMAGE_END.load(Ordering::Relaxed);
+        if base != 0
+            && !(base..end).contains(&pc)
+            && record.ExceptionFlags & bun_sys::windows::EXCEPTION_NONCONTINUABLE == 0
+        {
+            return bun_sys::windows::EXCEPTION_CONTINUE_SEARCH;
+        }
+
         // Windows: capture_from_context uses RtlCaptureStackBackTrace and trims
         // by `pc`; the frame-pointer slot is unused.
+        crash_handler(reason, TraceSeed::Fault { pc, fp: 0 });
+    }
+
+    /// Called from JSC's `jscJITSEHHandler` when SEH dispatch reaches a
+    /// JIT/LLInt frame with an unhandled exception. Reports the crash if the
+    /// reason is one we classify; otherwise continues the search so an outer
+    /// handler (or UEF) can claim it.
+    #[cfg(windows)]
+    #[unsafe(no_mangle)]
+    pub(crate) extern "C" fn Bun__crashHandlerFromJSCFrame(
+        record: *mut bun_sys::windows::EXCEPTION_RECORD,
+        _establisher_frame: *mut core::ffi::c_void,
+        _context: *mut core::ffi::c_void,
+        _dispatcher: *mut core::ffi::c_void,
+    ) -> c_long {
+        // SAFETY: kernel provides a valid EXCEPTION_RECORD.
+        let record = unsafe { &*record };
+        let Some(reason) = classify_exception_windows(record) else {
+            // ExceptionContinueSearch
+            return 1;
+        };
+        let pc = record.ExceptionAddress as usize;
+        crash_handler(reason, TraceSeed::Fault { pc, fp: 0 });
+    }
+
+    #[cfg(windows)]
+    pub(crate) extern "system" fn handle_unhandled_exception_windows(
+        info: *mut bun_sys::windows::EXCEPTION_POINTERS,
+    ) -> c_long {
+        // SAFETY: kernel provides a valid EXCEPTION_POINTERS / EXCEPTION_RECORD.
+        let record = unsafe { &*(*info).ExceptionRecord };
+        let Some(reason) = classify_exception_windows(record) else {
+            return bun_sys::windows::EXCEPTION_EXECUTE_HANDLER;
+        };
+        let pc = record.ExceptionAddress as usize;
         crash_handler(reason, TraceSeed::Fault { pc, fp: 0 });
     }
 
