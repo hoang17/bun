@@ -2113,11 +2113,16 @@ mod draft {
         // registers unwind info for JIT/LLInt and a language-specific handler
         // that routes back to `Bun__crashHandlerFromJSCFrame`, and
         // `handle_unhandled_exception_windows` reports anything that still
-        // goes unhandled.
+        // goes unhandled. Stack overflow is always claimed here: no foreign
+        // `__except` recovers from it in practice, and SEH dispatch itself
+        // costs stack the guard reserve may not have.
         let pc = record.ExceptionAddress as usize;
         let base = WINDOWS_EXE_IMAGE_BASE.load(Ordering::Relaxed);
         let end = WINDOWS_EXE_IMAGE_END.load(Ordering::Relaxed);
-        if base != 0 && !(base..end).contains(&pc) {
+        if !matches!(reason, CrashReason::StackOverflow)
+            && base != 0
+            && !(base..end).contains(&pc)
+        {
             return bun_sys::windows::EXCEPTION_CONTINUE_SEARCH;
         }
 
@@ -2126,10 +2131,10 @@ mod draft {
         crash_handler(reason, TraceSeed::Fault { pc, fp: 0 });
     }
 
-    /// Called from JSC's `jscJITSEHHandler` when SEH dispatch reaches a
-    /// JIT/LLInt frame with an unhandled exception. Reports the crash if the
-    /// reason is one we classify; otherwise continues the search so an outer
-    /// handler (or UEF) can claim it.
+    /// Called from JSC's `jscJITSEHHandler` when SEH dispatch reaches a JIT
+    /// frame with an unhandled exception. Reports the crash if the reason is
+    /// one we classify; otherwise continues the search so an outer handler
+    /// (or UEF) can claim it.
     #[cfg(windows)]
     #[unsafe(no_mangle)]
     pub(crate) extern "C" fn Bun__crashHandlerFromJSCFrame(
@@ -2138,11 +2143,24 @@ mod draft {
         _context: *mut core::ffi::c_void,
         _dispatcher: *mut core::ffi::c_void,
     ) -> c_long {
+        use bun_sys::windows::disposition::ExceptionContinueSearch;
         // SAFETY: kernel provides a valid EXCEPTION_RECORD.
         let record = unsafe { &*record };
+        // A PEXCEPTION_ROUTINE can also be invoked during the unwind phase if
+        // the frame's UNWIND_INFO carries UNW_FLAG_UHANDLER (the WebKit side
+        // currently sets EHANDLER only; this matches SpiderMonkey's guard).
+        // Also decline once `reset_segfault_handler` has torn down the VEH so
+        // a re-fault during teardown reaches the OS default instead of
+        // re-entering `crash_handler`.
+        if record.ExceptionFlags & bun_sys::windows::EXCEPTION_UNWIND != 0
+            || bun_core::WINDOWS_SEGFAULT_HANDLE
+                .load(Ordering::Relaxed)
+                .is_null()
+        {
+            return ExceptionContinueSearch;
+        }
         let Some(reason) = classify_exception_windows(record) else {
-            // ExceptionContinueSearch
-            return 1;
+            return ExceptionContinueSearch;
         };
         let pc = record.ExceptionAddress as usize;
         crash_handler(reason, TraceSeed::Fault { pc, fp: 0 });

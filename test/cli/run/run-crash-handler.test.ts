@@ -231,23 +231,31 @@ describe.if(isWindows)("Windows VEH handler and first-chance faults in external 
   });
 
   // End-to-end: warm a JS function into the JIT, then fault from inside it
-  // via FFI. The crash report must still fire (via jscJITSEHHandler at the
-  // JIT boundary). Disables the concurrent JIT so warm-up is deterministic.
-  test("unguarded fault from inside a JIT-compiled frame still crash-reports", async () => {
+  // via FFI. The crash report must fire via jscJITSEHHandler at the JIT
+  // boundary. Clears the UEF backstop first so the assertion isolates the JSC
+  // handler (deleting setJITExceptionHandlerWin would break this test, not
+  // just fall through to UEF). Disables the concurrent JIT so warm-up is
+  // deterministic.
+  test("unguarded fault from inside a JIT-compiled frame still crash-reports via the JSC handler", async () => {
     await using proc = Bun.spawn({
       cmd: [
         bunExe(),
         "--debug-crash-handler-use-trace-string",
         "-e",
         `const { dlopen } = require("bun:ffi");
-         const lib = dlopen("ntdll.dll", {
+         const ntdll = dlopen("ntdll.dll", {
            RtlFillMemory: { args: ["usize", "usize", "i32"], returns: "void" },
          });
+         const k32 = dlopen("kernel32.dll", {
+           SetUnhandledExceptionFilter: { args: ["usize"], returns: "usize" },
+         });
          function hot(i) {
-           if (i === 10000) lib.symbols.RtlFillMemory(0xE8, 8, 0);
+           if (i === 10000) ntdll.symbols.RtlFillMemory(0xE8, 8, 0);
            return i;
          }
-         for (let i = 0; i <= 10000; i++) hot(i);
+         for (let i = 0; i < 10000; i++) hot(i);
+         k32.symbols.SetUnhandledExceptionFilter(0);
+         hot(10000);
          console.log("SHOULD NOT REACH");`,
       ],
       env: { ...noReportEnv, BUN_JSC_jitPolicyScale: "0", BUN_JSC_useConcurrentJIT: "0" },

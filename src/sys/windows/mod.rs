@@ -1210,6 +1210,21 @@ pub const EXCEPTION_CONTINUE_EXECUTION: i32 = -1;
 pub const EXCEPTION_CONTINUE_SEARCH: i32 = 0;
 pub const MS_VC_EXCEPTION: u32 = 0x406d1388;
 
+/// `EXCEPTION_DISPOSITION` (excpt.h): return type of a `PEXCEPTION_ROUTINE`
+/// language-specific handler. A different enum from the filter/VEH constants
+/// above (`EXCEPTION_CONTINUE_SEARCH == 0` there, `ExceptionContinueSearch ==
+/// 1` here); mixing the two turns "continue search" into "resume at fault".
+#[allow(nonstandard_style)]
+pub mod disposition {
+    use core::ffi::c_long;
+    pub const ExceptionContinueExecution: c_long = 0;
+    pub const ExceptionContinueSearch: c_long = 1;
+}
+
+/// `EXCEPTION_UNWIND` (winnt.h): mask of `ExceptionFlags` bits set during the
+/// unwind (not search) phase of frame-based dispatch.
+pub const EXCEPTION_UNWIND: u32 = 0x66;
+
 /// `[base, base + SizeOfImage)` of the process executable, read once from the
 /// mapped PE header. The crash handler uses this to tell first-chance
 /// exceptions raised inside Bun's own code from those raised inside foreign

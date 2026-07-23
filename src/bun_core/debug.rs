@@ -355,16 +355,19 @@ pub fn capture_from_context(pc: usize, fp: usize, out: &mut [usize]) -> usize {
                 core::ptr::null_mut(),
             )
         } as usize;
-        // VEH runs on the faulting thread's stack, so the captured trace is
-        // [handler frames…][fault frame][callers…]. Trim everything above the
-        // first frame whose return address sits within a small tolerance of
-        // the fault `pc` (the call-site/return-address may be a few bytes
-        // off). If no match, keep the full trace rather than discard it.
+        // The handler runs on the faulting thread's stack, so the captured
+        // trace is [handler frames…][fault frame][callers…]. Trim everything
+        // above the first frame whose return address sits within a small
+        // tolerance of the fault `pc` (the call-site/return-address may be a
+        // few bytes off). The scan depth covers the deepest path here
+        // (UnhandledExceptionFilter → __C_specific_handler →
+        // RtlDispatchException → KiUserExceptionDispatcher); if no match,
+        // keep the full trace rather than discard it.
         const TOLERANCE: usize = 256;
         let frames = &out[1..1 + got];
         let skip = frames
             .iter()
-            .take(12)
+            .take(24)
             .position(|&a| a.abs_diff(pc) <= TOLERANCE)
             .map(|i| i + 1)
             .unwrap_or(0);
