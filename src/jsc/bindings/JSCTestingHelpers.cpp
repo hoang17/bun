@@ -9,7 +9,9 @@
 #if OS(WINDOWS)
 #include <JavaScriptCore/ExecutableAllocator.h>
 #include <JavaScriptCore/JSBigInt.h>
-#include <JavaScriptCore/LLIntPCRanges.h>
+// From JavaScriptCore/llint/LLIntPCRanges.h (not forwarded in the prebuilt
+// headers); the symbol is `extern "C"` so the namespace only scopes the name.
+namespace JSC { namespace LLInt { extern "C" void llintPCRangeStart(); } }
 #endif
 
 namespace Bun {
