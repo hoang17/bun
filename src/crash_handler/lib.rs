@@ -1788,7 +1788,7 @@ mod draft {
                 // Backstop for exceptions the VEH passed on: runs only after
                 // every frame-based (SEH) handler has declined, so an
                 // exception a foreign module handles itself never reaches it.
-                // The handler JSC registers for JIT/LLInt frames
+                // The handler JSC registers for JIT frames
                 // (ZigGlobalObject.cpp -> setJITExceptionHandlerWin) catches
                 // the under-JIT case before this.
                 bun_sys::windows::kernel32::SetUnhandledExceptionFilter(Some(
@@ -2110,7 +2110,8 @@ mod draft {
         // fatal kills the process for what the callee was about to recover
         // from. So only take over here when the faulting instruction is inside
         // Bun's own image; for foreign code, let SEH dispatch proceed. JSC
-        // registers unwind info for JIT/LLInt and a language-specific handler
+        // registers unwind info for its JIT pool with a language-specific
+        // handler (LLInt is pending build-time offlineasm .seh_* emission)
         // that routes back to `Bun__crashHandlerFromJSCFrame`, and
         // `handle_unhandled_exception_windows` reports anything that still
         // goes unhandled. Stack overflow is always claimed here: no foreign

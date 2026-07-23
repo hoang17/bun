@@ -58,8 +58,10 @@ JSC_DEFINE_HOST_FUNCTION(jsFunctionIsLatin1String,
 JSC_DEFINE_HOST_FUNCTION(jsFunctionStartOfFixedExecutableMemoryPool,
     (JSGlobalObject * globalObject, CallFrame*))
 {
-    return JSValue::encode(JSBigInt::makeHeapBigIntOrBigInt32(globalObject,
-        static_cast<uint64_t>(JSC::startOfFixedExecutableMemoryPool<uintptr_t>())));
+    auto& vm = JSC::getVM(globalObject);
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    RELEASE_AND_RETURN(scope, JSValue::encode(JSBigInt::makeHeapBigIntOrBigInt32(globalObject,
+        static_cast<uint64_t>(JSC::startOfFixedExecutableMemoryPool<uintptr_t>()))));
 }
 #endif
 

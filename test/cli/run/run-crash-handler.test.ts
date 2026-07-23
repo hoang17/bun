@@ -166,7 +166,7 @@ describe.if(isWindows)("Windows VEH handler and first-chance faults in external 
 
   // `RtlFillMemory` has no `__try`/`__except` around its store. With the VEH
   // now returning CONTINUE_SEARCH for out-of-image PCs, the catch point is
-  // JSC's jscJITSEHHandler (registered for JIT and LLInt frames), which
+  // JSC's jscJITSEHHandler (registered for JIT frames), which
   // routes to Bun__crashHandlerFromJSCFrame, or UEF. This exercises that the
   // crash is still reported and the report carries the fault address.
   test("unguarded fault still crash-reports", async () => {

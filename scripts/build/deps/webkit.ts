@@ -9,8 +9,8 @@
 // typed-array constructor ClassInfo kept address-unique under LTO, the
 // Windows ICU data table filtered + per-item zstd compressed, and Windows
 // unwind info (RtlAddGrowableFunctionTable) registered for the fixed JIT
-// pool and the LLInt range.
-export const WEBKIT_VERSION = "autobuild-preview-pr-315-d23a372e";
+// pool (LLInt pending offlineasm .seh_* emission).
+export const WEBKIT_VERSION = "autobuild-preview-pr-315-ed1c14e9";
 
 /**
  * WebKit (JavaScriptCore) — the JS engine.

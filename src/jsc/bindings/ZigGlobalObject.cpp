@@ -365,9 +365,10 @@ extern "C" void JSCInitialize(const char* envp[], size_t envc, void (*onCrash)(c
 
 #if OS(WINDOWS) && (CPU(X86_64) || CPU(ARM64))
         // JSC::initialize() registered unwind info + a language-specific SEH
-        // handler for the JIT pool and the LLInt range. Route that handler to
-        // the crash reporter so a hardware fault under a JSC frame is reported
-        // deterministically at the JSC boundary.
+        // handler for the JIT pool. Route that handler to the crash reporter
+        // so a hardware fault under a JIT frame is reported deterministically
+        // at the JSC boundary. LLInt is not yet covered (needs build-time
+        // offlineasm .seh_* emission).
         JSC::setJITExceptionHandlerWin(&Bun__crashHandlerFromJSCFrame);
 #endif
     }); // end std::call_once lambda
