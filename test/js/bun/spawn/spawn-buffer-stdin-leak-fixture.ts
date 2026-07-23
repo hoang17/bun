@@ -1,11 +1,20 @@
 // Driven by spawn-buffer-stdin-leak.test.ts. Measures RSS growth across a
-// warmed-up round of `Bun.spawn` with a small ArrayBuffer stdin and prints a
+// warmed-up round of `Bun.spawn` with an ArrayBuffer stdin and prints a
 // single JSON line. Runs in its own process so the test runner's heap does
-// not drown the ~2 MB leak signal.
+// not drown the leak signal.
+//
+// Two modes (argv[2]):
+//   "drain": 64 bytes into `sort` (reads stdin to EOF). The uv_write fits
+//            the pipe buffer and completes successfully before the child
+//            exits, so `StaticPipeWriter::on_write` runs the close path.
+//   "reject": 256 KB into `cmd /c exit` (never reads stdin). The write
+//            overflows the pipe buffer and the child closes the read end,
+//            so `WindowsBufferedWriter::on_write_complete` takes its error
+//            arm (`close()` then `on_error()` with no `Parent::on_write`).
 
-// 64 bytes fits the pipe buffer so the parent's uv_write completes before the
-// child exits, putting `StaticPipeWriter::on_write` on the close path.
-const stdinBuf = Buffer.alloc(64, "x");
+const mode = process.argv[2] === "reject" ? "reject" : "drain";
+const stdinBuf = mode === "drain" ? Buffer.alloc(64, "x") : Buffer.alloc(256 * 1024, "x");
+const childCmd = mode === "drain" ? ["sort"] : ["cmd", "/c", "exit"];
 
 const BATCH = 40;
 const N = 3000;
@@ -15,10 +24,7 @@ async function spawnBatch(count: number) {
     const procs: Promise<number>[] = [];
     for (let j = 0; j < BATCH && i + j < count; j++) {
       const proc = Bun.spawn({
-        // `sort` is a built-in Windows binary that reads stdin to EOF; it
-        // starts far faster than another bun, which matters for a
-        // 6000-iteration RSS probe under a debug build.
-        cmd: ["sort"],
+        cmd: [...childCmd],
         stdin: stdinBuf,
         stdout: "ignore",
         stderr: "ignore",
@@ -45,4 +51,4 @@ await settle();
 const after = process.memoryUsage.rss();
 
 const deltaKB = (after - before) / 1024;
-process.stdout.write(JSON.stringify({ N, deltaKB: Math.round(deltaKB) }) + "\n");
+process.stdout.write(JSON.stringify({ mode, N, deltaKB: Math.round(deltaKB) }) + "\n");
