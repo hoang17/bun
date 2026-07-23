@@ -1226,7 +1226,9 @@ pub fn exe_image_range() -> core::ops::Range<usize> {
         let e_lfanew = *(base as *const u8).add(0x3C).cast::<u32>() as usize;
         // IMAGE_NT_HEADERS64: Signature(4) + IMAGE_FILE_HEADER(20) +
         // IMAGE_OPTIONAL_HEADER64.SizeOfImage at offset 56.
-        let size_of_image = *(base as *const u8).add(e_lfanew + 4 + 20 + 56).cast::<u32>() as usize;
+        let size_of_image = *(base as *const u8)
+            .add(e_lfanew + 4 + 20 + 56)
+            .cast::<u32>() as usize;
         base..base + size_of_image
     }
 }
